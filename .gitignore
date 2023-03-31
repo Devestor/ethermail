@@ -1,0 +1,4 @@
+.goreload
+*.csv
+Makefile
+vendor/
