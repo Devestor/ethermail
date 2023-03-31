@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,7 @@ import (
 
 func main() {
 	// open file
-	f, err := os.Open("Ethermail_List.csv") // headers No.,	Ethermail Address,	Token at row 1
+	f, err := os.Open("Ex_Ethermail_List.csv") // headers No.,	Ethermail Address,	Token at row 1
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -79,21 +80,33 @@ func ReadAllMessage(mailList []string, tokenMap map[string]string) {
 
 	for k, mail := range mailList {
 		token := tokenMap[mail]
-		mailboxes := GetMailBoxes(token)
 		var mailboxID, mailIDs, remark string
-		var resulrMakeRead *ReponseMakeReadAll
+		var resultMakeRead *ReponseMakeReadAll
+		var err error
+
+		mailboxes, err := GetMailBoxes(token)
+		if err != nil {
+			log.Println("GetMailBoxes error: ", err)
+		}
+
 		if len(mailboxes.Results) > 0 {
 			mailboxID = mailboxes.Results[0].ID
-			mailIDs = GetAllMailBox(mailboxID, token)
-			resulrMakeRead = MakeReadAll(mailboxID, mailIDs, token)
+			mailIDs, err = GetAllMailBox(mailboxID, token)
+			if err != nil {
+				log.Println("GetAllMailBox error: ", err)
+			}
+			resultMakeRead, err = MakeReadAll(mailboxID, mailIDs, token)
+			if err != nil {
+				log.Println("MakeReadAll error: ", err)
+			}
 			remark = "Found"
 		} else {
 			remark = fmt.Sprintf("%d) Not found mailbox, Mail: %s", k+1, mail)
 		}
-		log.Printf("%d) GetAllMailBox: Mail: %s, mailIDs: %s, Success: %s, Updated: %s, Remark: %s", k+1, mail, mailIDs, strconv.FormatBool(resulrMakeRead.Success), strconv.Itoa(resulrMakeRead.Updated), remark)
+		log.Printf("%d) GetAllMailBox: Mail: %s, mailIDs: %s, Success: %s, Updated: %s, Remark: %s", k+1, mail, mailIDs, strconv.FormatBool(resultMakeRead.Success), strconv.Itoa(resultMakeRead.Updated), remark)
 
 		// Added csv data
-		empData = append(empData, []string{strconv.FormatInt(int64(k+1), 10), mail, mailIDs, strconv.FormatBool(resulrMakeRead.Success), strconv.Itoa(resulrMakeRead.Updated), remark})
+		empData = append(empData, []string{strconv.FormatInt(int64(k+1), 10), mail, mailIDs, strconv.FormatBool(resultMakeRead.Success), strconv.Itoa(resultMakeRead.Updated), remark})
 	}
 
 	// filename
@@ -127,8 +140,14 @@ func SendMail(mailList []string, tokenMap map[string]string) {
 
 		// Random mails for send
 		rand.NewSource(time.Now().UnixNano())
-		numbers := randomSample(len(mailList), 10)
-		log.Println(numbers)
+		var amountRandom int
+		if len(mailList) < 10 {
+			amountRandom = len(mailList) - 2
+		} else {
+			amountRandom = 10
+		}
+		numbers := randomSample(len(mailList), amountRandom)
+		log.Println(amountRandom, numbers)
 
 		var totalSkip int
 		for k, v := range numbers {
@@ -139,7 +158,11 @@ func SendMail(mailList []string, tokenMap map[string]string) {
 			}
 			token := tokenMap[mailList[v]]
 			toAddress := mailList[v]
-			result := RequestSend(fromAddress, token, toAddress)
+			result, err := RequestSend(fromAddress, token, toAddress)
+			if err != nil {
+				log.Println("RequestSend error: ", err)
+				result += ", error: " + err.Error()
+			}
 
 			// Added csv data
 			empData = append(empData, []string{strconv.FormatInt(int64(k+1), 10), fromAddress, toAddress, result})
@@ -179,15 +202,14 @@ func SendMail(mailList []string, tokenMap map[string]string) {
 	csvFile.Close()
 }
 
-func RequestSend(fromAddress, fromToken, toAddress string) string {
+func RequestSend(fromAddress, fromToken, toAddress string) (string, error) {
 	fmt.Printf("From: %s, To: %s\n", fromAddress, toAddress)
 	if toAddress == fromAddress {
-		return ""
+		return "", errors.New("toAddress == fromAddress")
 	}
 
 	if len(fromToken) == 0 {
-		log.Println("token is empty")
-		return ""
+		return "", errors.New("token is empty")
 	}
 
 	data := Payload{
@@ -227,36 +249,33 @@ func RequestSend(fromAddress, fromToken, toAddress string) string {
 
 	payloadBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Println("#1: ", err)
-		// handle err
+		return "", err
 	}
 	body := bytes.NewReader(payloadBytes)
 
 	req, err := http.NewRequest("POST", "https://ethermail.io/api/users/submit", body)
 	if err != nil {
-		// handle err
-		log.Println("#2: ", err)
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Cookie", fmt.Sprintf("webmail=%s;", fromToken))
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// handle err
-		log.Println("#3: ", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalln(err)
+		return "", err
 	}
 
 	fmt.Println("Output: ", string(b))
-	return string(b)
+	return string(b), nil
 }
 
-func MakeReadAll(mailbox, message, token string) *ReponseMakeReadAll {
+func MakeReadAll(mailbox, message, token string) (*ReponseMakeReadAll, error) {
 	type Payload struct {
 		Message string `json:"message"`
 		Seen    bool   `json:"seen"`
@@ -268,13 +287,13 @@ func MakeReadAll(mailbox, message, token string) *ReponseMakeReadAll {
 	}
 	payloadBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Fatalln(err)
+		return nil, err
 	}
 	body := bytes.NewReader(payloadBytes)
 
 	req, err := http.NewRequest("PUT", "https://ethermail.io/api/mailboxes/"+mailbox+"/messages", body)
 	if err != nil {
-		log.Fatalln(err)
+		return nil, err
 	}
 	req.Header.Set("Authority", "ethermail.io")
 	req.Header.Set("Accept", "*/*")
@@ -286,24 +305,24 @@ func MakeReadAll(mailbox, message, token string) *ReponseMakeReadAll {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Fatalln(err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalln(err)
+		return nil, err
 	}
 
 	xResp := new(ReponseMakeReadAll)
 	err = json.Unmarshal(b, &xResp)
 	if err != nil {
-		log.Println(err)
+		return nil, err
 	}
 
-	return xResp
+	return xResp, nil
 }
 
-func GetAllMailBox(mailbox, token string) string {
+func GetAllMailBox(mailbox, token string) (string, error) {
 	type Payload struct {
 		Next     string `json:"next"`
 		Previous string `json:"previous"`
@@ -315,13 +334,13 @@ func GetAllMailBox(mailbox, token string) string {
 	}
 	payloadBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Fatalln(err)
+		return "", err
 	}
 	body := bytes.NewReader(payloadBytes)
 
 	req, err := http.NewRequest("POST", "https://ethermail.io/api/messages/search", body)
 	if err != nil {
-		log.Fatalln(err)
+		return "", err
 	}
 	req.Header.Set("Authority", "ethermail.io")
 	req.Header.Set("Accept", "*/*")
@@ -333,19 +352,19 @@ func GetAllMailBox(mailbox, token string) string {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Fatalln(err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalln(err)
+		return "", err
 	}
 
 	xResp := new(GetAllMailBoxResponse)
 	err = json.Unmarshal(b, &xResp)
 	if err != nil {
-		log.Println(err)
+		return "", err
 	}
 
 	var result []string
@@ -353,10 +372,10 @@ func GetAllMailBox(mailbox, token string) string {
 		result = append(result, strconv.Itoa(v.ID))
 	}
 
-	return strings.Join(result, ",")
+	return strings.Join(result, ","), nil
 }
 
-func GetMailBoxes(token string) *GetMailBoxesResponse {
+func GetMailBoxes(token string) (*GetMailBoxesResponse, error) {
 
 	req, err := http.NewRequest("GET", "https://ethermail.io/api/mailboxes", nil)
 	if err != nil {
@@ -369,20 +388,20 @@ func GetMailBoxes(token string) *GetMailBoxesResponse {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// handle err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalln(err)
+		return nil, err
 	}
 
 	xResp := new(GetMailBoxesResponse)
 	err = json.Unmarshal(b, &xResp)
 	if err != nil {
-		log.Println(err)
+		return nil, err
 	}
 
-	return xResp
+	return xResp, nil
 }
