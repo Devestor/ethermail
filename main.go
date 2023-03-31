@@ -72,7 +72,7 @@ func main() {
 }
 
 func ReadAllMessage(mailList []string, tokenMap map[string]string) {
-	// Csv Data
+	// Csv Headers
 	empData := [][]string{
 		{"No.", "Mail", "Mail IDs", "Status", "Updated", "Remark"},
 	}
@@ -116,7 +116,7 @@ func ReadAllMessage(mailList []string, tokenMap map[string]string) {
 }
 
 func SendMail(mailList []string, tokenMap map[string]string) {
-	// Csv Data
+	// Csv Headers
 	empData := [][]string{
 		{"No.", "From Address", "To Address", "Response"},
 	}
