@@ -18,8 +18,29 @@ import (
 )
 
 func main() {
+	// open file
+	f, err := os.Open("Ethermail_List.csv") // headers No.,	Ethermail Address,	Token at row 1
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// close the file at the end of the program
+	defer f.Close()
+
+	// read csv values using csv.Reader
+	csvReader := csv.NewReader(f)
+	csvData, err := csvReader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// convert csv data to map
 	tokenMap := make(map[string]string)
-	tokenMap["xxxxxxxxx@ethermail.io"] = "xxxxxxx"
+	for _, line := range csvData {
+		mail := line[1]
+		token := line[2]
+		tokenMap[mail] = token
+	}
 
 	// Getting a slice
 	mailList := []string{}
@@ -27,11 +48,12 @@ func main() {
 		mailList = append(mailList, k)
 	}
 
-	location, err := time.LoadLocation("Asia/Bangkok")
-	if err != nil {
-		log.Fatal("Unfortunately can't load a location")
-	}
+	fmt.Println("Service starting...")
 
+	// Set timezone
+	location, _ := time.LoadLocation("Asia/Bangkok")
+
+	// New scheduler with timezone
 	scheduler := gocron.NewScheduler(location)
 	scheduler.Every(1).Day().At("11:59").Do(func() {
 
@@ -44,12 +66,13 @@ func main() {
 		fmt.Println("End Read messages")
 	})
 
+	// start scheduler
 	scheduler.StartAsync()
 	scheduler.StartBlocking()
-
 }
 
 func ReadAllMessage(mailList []string, tokenMap map[string]string) {
+	// Csv Data
 	empData := [][]string{
 		{"No.", "Mail", "Mail IDs", "Status", "Updated", "Remark"},
 	}
@@ -63,23 +86,27 @@ func ReadAllMessage(mailList []string, tokenMap map[string]string) {
 			mailboxID = mailboxes.Results[0].ID
 			mailIDs = GetAllMailBox(mailboxID, token)
 			resulrMakeRead = MakeReadAll(mailboxID, mailIDs, token)
-
 			remark = "Found"
 		} else {
 			remark = fmt.Sprintf("%d) Not found mailbox, Mail: %s", k+1, mail)
 		}
 		log.Printf("%d) GetAllMailBox: Mail: %s, mailIDs: %s, Success: %s, Updated: %s, Remark: %s", k+1, mail, mailIDs, strconv.FormatBool(resulrMakeRead.Success), strconv.Itoa(resulrMakeRead.Updated), remark)
 
+		// Added csv data
 		empData = append(empData, []string{strconv.FormatInt(int64(k+1), 10), mail, mailIDs, strconv.FormatBool(resulrMakeRead.Success), strconv.Itoa(resulrMakeRead.Updated), remark})
 	}
 
+	// filename
 	now := time.Now().Format("02-01-2006 15:04:05")
 	fileName := "ReadAllMessage_result_" + now + ".csv"
+
+	// Create csv file
 	csvFile, err := os.Create(fileName)
 	if err != nil {
 		log.Fatalf("failed creating file: %s", err)
 	}
 
+	// Write csv file
 	csvwriter := csv.NewWriter(csvFile)
 	for _, empRow := range empData {
 		_ = csvwriter.Write(empRow)
@@ -89,6 +116,7 @@ func ReadAllMessage(mailList []string, tokenMap map[string]string) {
 }
 
 func SendMail(mailList []string, tokenMap map[string]string) {
+	// Csv Data
 	empData := [][]string{
 		{"No.", "From Address", "To Address", "Response"},
 	}
@@ -113,6 +141,7 @@ func SendMail(mailList []string, tokenMap map[string]string) {
 			toAddress := mailList[v]
 			result := RequestSend(fromAddress, token, toAddress)
 
+			// Added csv data
 			empData = append(empData, []string{strconv.FormatInt(int64(k+1), 10), fromAddress, toAddress, result})
 		}
 
@@ -130,17 +159,22 @@ func SendMail(mailList []string, tokenMap map[string]string) {
 		}
 	}
 
+	// filename
 	now := time.Now().Format("02-01-2006 15:04:05")
 	fileName := "SendMail_result_" + now + ".csv"
+
 	csvFile, err := os.Create(fileName)
 	if err != nil {
 		log.Fatalf("failed creating file: %s", err)
 	}
 
+	// Create csv file
 	csvwriter := csv.NewWriter(csvFile)
 	for _, empRow := range empData {
 		_ = csvwriter.Write(empRow)
 	}
+
+	// Write csv file
 	csvwriter.Flush()
 	csvFile.Close()
 }
